@@ -1,0 +1,806 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:http/http.dart' as http;
+
+import 'package:competition_career_academy/core/config/di/dependency_injection.dart';
+import 'package:competition_career_academy/core/router/app_routes.dart';
+import 'package:competition_career_academy/core/services/content_completion_service.dart';
+import 'package:competition_career_academy/core/network/token_refresh_service.dart';
+import 'package:competition_career_academy/core/session/session_service.dart';
+import 'package:competition_career_academy/core/utils/utils.dart';
+import 'package:competition_career_academy/core/widgets/custom_action_button.dart';
+import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
+import 'package:competition_career_academy/core/widgets/custom_text_form_field.dart';
+import 'package:competition_career_academy/core/widgets/logout_dialog.dart';
+import 'package:competition_career_academy/features/auth/data/services/google_account_picker_service.dart';
+import 'package:competition_career_academy/features/auth/presentation/widgets/google_email_picker_field.dart';
+import 'package:competition_career_academy/features/auth/presentation/widgets/phone_input_field.dart';
+import 'package:competition_career_academy/features/profile/domain/usecases/update_profile_usecase.dart';
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:competition_career_academy/core/theme/app_colors.dart';
+import 'package:competition_career_academy/core/theme/app_sizes.dart';
+import 'package:competition_career_academy/core/theme/app_typography.dart';
+import 'package:competition_career_academy/core/theme/responsive_helper.dart';
+import 'package:competition_career_academy/core/theme/screen.dart';
+import 'package:go_router/go_router.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+
+/// Setup Profile Screen
+/// Displayed when a user tries to login but is not registered yet.
+///
+/// Two entry shapes:
+///   • Phone signup → [phoneNumber] is set, [email] is empty,
+///     [isPhone] is true. User completes signup by filling email
+///     (editable) + name + gender.
+///   • Email signup → [email] is set + verified, [isPhone] is false.
+///     User completes signup by filling phone (editable) + name +
+///     gender. The verified email is shown but locked.
+class SetupProfilePage extends StatefulWidget {
+  final String phoneNumber;
+  final String countryCode;
+  final String email;
+  final bool isPhone;
+
+  const SetupProfilePage({
+    super.key,
+    required this.phoneNumber,
+    required this.countryCode,
+    this.email = '',
+    this.isPhone = true,
+  });
+
+  @override
+  State<SetupProfilePage> createState() => _SetupProfilePageState();
+}
+
+class _SetupProfilePageState extends State<SetupProfilePage> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  // Used only in the email-signup branch — the user types their phone
+  // here so the profile lands with both contact channels populated.
+  // Lives at top-level state so the controller's text survives
+  // rebuilds even when the field is conditionally rendered.
+  final _phoneController = TextEditingController();
+  // Country picked alongside [_phoneController] in the email-signup
+  // branch (phone-signup users already have a verified [widget.countryCode]
+  // instead). Defaults to whatever PhoneInputField itself defaults to.
+  Country _phoneCountry = const Country(
+    name: 'India',
+    code: 'IN',
+    dialCode: '+91',
+    flag: '🇮🇳',
+  );
+  DateTime? _selectedDate;
+  String? _selectedGender;
+  File? _profileImage;
+  // Loading flag for the Google account picker specifically — kept
+  // separate from the "Continue" button's own start/stopLoading so
+  // picking an email doesn't visually disable the rest of the form.
+  bool _isPickingGoogleEmail = false;
+
+  /// Guards against a second `pickImage` while the first is still
+  /// opening. The platform channel behind [ImagePicker] is a
+  /// singleton regardless of how many Dart instances we construct,
+  /// so a double-tap on the avatar throws
+  /// `PlatformException(already_active)`.
+  bool _isPickingImage = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Email-signup entry: pre-fill the email field with the verified
+    // address so the user can see it (and so the locked field shows
+    // a value, not a placeholder).
+    if (!widget.isPhone && widget.email.isNotEmpty) {
+      _emailController.text = widget.email;
+      // A number collected before the email hand-off (the non-India
+      // "Next" flow) arrives alongside it — pre-fill it, editable, so
+      // the learner doesn't type the same number twice.
+      if (widget.phoneNumber.isNotEmpty) {
+        _phoneController.text = widget.phoneNumber;
+        _phoneCountry = _countryForDialCode(widget.countryCode);
+      }
+    }
+    // If the user reached login through the Google picker, reuse the
+    // name and photo it already returned. Cached on the service because
+    // the OTP page sits between that pick and this screen.
+    _applyGoogleAccount(sl<GoogleAccountPickerService>().lastPicked);
+  }
+
+  /// Rebuilds the country the learner was on from the dial code carried
+  /// through the route. Falls back to the India default when the code is
+  /// one the picker doesn't list, which only costs the flag — the dial
+  /// code itself still goes out with the profile.
+  Country _countryForDialCode(String dialCode) {
+    for (final country in PhoneInputField.countries) {
+      if (country.dialCode == dialCode) return country;
+    }
+    return _phoneCountry;
+  }
+
+  /// Prefills whatever [account] offers without overwriting anything the
+  /// user has already entered — Google's values are a convenience, not
+  /// an authority.
+  void _applyGoogleAccount(GoogleAccountInfo? account) {
+    if (account == null) return;
+
+    final name = account.displayName?.trim() ?? '';
+    if (name.isNotEmpty && _nameController.text.trim().isEmpty) {
+      _nameController.text = name;
+    }
+
+    final photo = account.photoUrl;
+    if (photo != null && photo.isNotEmpty && _profileImage == null) {
+      unawaited(_downloadGooglePhoto(photo));
+    }
+  }
+
+  /// Pulls the Google avatar down to a temp file so it flows through the
+  /// existing multipart upload path, which expects a [File] rather than
+  /// a URL. Best-effort: a failure just leaves the default avatar, since
+  /// the photo is optional anyway.
+  Future<void> _downloadGooglePhoto(String url) async {
+    try {
+      final response = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200 || response.bodyBytes.isEmpty) return;
+
+      final dir = await getTemporaryDirectory();
+      final file = File(
+        '${dir.path}/google_avatar_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
+      await file.writeAsBytes(response.bodyBytes);
+
+      if (!mounted) return;
+      // Still guard on null: the user may have picked their own photo
+      // while the download was in flight, and theirs wins.
+      if (_profileImage == null) setState(() => _profileImage = file);
+    } catch (e) {
+      debugPrint('Google avatar download failed: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage() async {
+    if (_isPickingImage) return;
+    _isPickingImage = true;
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 80,
+      );
+      if (!mounted || picked == null) return;
+      setState(() => _profileImage = File(picked.path));
+    } on PlatformException catch (e) {
+      // `already_active` (a racing pick) and a denied gallery permission
+      // both land here. Neither is worth a crash report — the user simply
+      // ends up without a new photo and can tap again.
+      debugPrint('Profile image pick failed: ${e.code}');
+    } finally {
+      _isPickingImage = false;
+    }
+  }
+
+  /// Opens the native Google account picker so a phone-signup user can
+  /// pick their email in one tap instead of typing it (and risking a
+  /// typo the backend then has to bounce OTPs against).
+  Future<void> _handlePickGoogleEmail() async {
+    if (!mounted || _isPickingGoogleEmail) return;
+    setState(() => _isPickingGoogleEmail = true);
+
+    GoogleAccountInfo? account;
+    try {
+      account = await sl<GoogleAccountPickerService>().pickAccount();
+    } catch (e) {
+      if (mounted) {
+        CustomSnackbar.error(
+          context,
+          title: 'Error',
+          message: 'Could not get your Google account: ${e.toString()}',
+        );
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isPickingGoogleEmail = false;
+      if (account != null) _emailController.text = account.email;
+    });
+    _applyGoogleAccount(account);
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now(),
+      firstDate: DateTime(1900),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            // Built from the active brightness, not pinned to light —
+            // otherwise the picker stays a white sheet with black text
+            // in dark mode. onPrimary is the label on the selected day,
+            // which sits on AppColors.primary (white in dark mode).
+            colorScheme:
+                (AppColors.isDark
+                        ? const ColorScheme.dark()
+                        : const ColorScheme.light())
+                    .copyWith(
+                      primary: AppColors.primaryFill,
+                      onPrimary: AppColors.onPrimary,
+                      surface: AppColors.white,
+                      onSurface: AppColors.textPrimary,
+                    ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  String _formatDate(DateTime? date) => Utils.formatDdMmmYyyy(date);
+
+  int _genderToInt(String gender) {
+    switch (gender) {
+      case 'Male':
+        return 1;
+      case 'Female':
+        return 2;
+      default:
+        return 0;
+    }
+  }
+
+  String _formatDateForApi(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _handleContinue(
+    Function startLoading,
+    Function stopLoading,
+  ) async {
+    if (!_formKey.currentState!.validate()) return;
+
+    // Phone-signup users have no typed email field anymore — the only
+    // source is a Google pick, so check it explicitly here instead of
+    // via a FormField validator.
+    if (widget.isPhone && _emailController.text.trim().isEmpty) {
+      CustomSnackbar.error(
+        context,
+        title: 'Email Required',
+        message: 'Please pick an email with Google to continue.',
+      );
+      return;
+    }
+
+    // DOB + profile photo are optional now — only gender stays
+    // required because the API still expects a non-null gender enum.
+    // Image / dob arguments to the use case are null-safe (see
+    // UpdateProfileUseCase signature), so passing them through as
+    // null when the user skipped them is the correct shape.
+    if (_selectedGender == null) {
+      CustomSnackbar.warning(
+        context,
+        title: 'Gender Required',
+        message: 'Please select your gender to continue.',
+      );
+      return;
+    }
+
+    startLoading();
+
+    // Phone vs email branch decides which side carries the verified
+    // value and which side reads from the user's input. The opposite
+    // channel is left to whatever the user typed (or empty when the
+    // email-signup user skipped phone) — backend treats empty as
+    // "not set yet".
+    final phoneToSend = widget.isPhone
+        ? widget.phoneNumber
+        : _phoneController.text.trim();
+    final emailToSend = widget.isPhone
+        ? _emailController.text.trim()
+        : widget.email;
+    // Dial code without the leading '+' (e.g. "234" for Nigeria), sent
+    // alongside phoneToSend so the backend knows which country it
+    // belongs to. Phone-signup already carries a verified dial code in
+    // widget.countryCode; email-signup uses whatever the user picked
+    // in the PhoneInputField's country selector.
+    final stdCodeToSend = widget.isPhone
+        ? widget.countryCode.replaceFirst('+', '')
+        : _phoneCountry.dialCode.replaceFirst('+', '');
+
+    final result = await sl<UpdateProfileUseCase>()(
+      name: _nameController.text.trim(),
+      phoneNumber: phoneToSend.isEmpty ? null : phoneToSend,
+      email: emailToSend.isEmpty ? null : emailToSend,
+      dob: _selectedDate != null ? _formatDateForApi(_selectedDate!) : null,
+      gender: _genderToInt(_selectedGender!),
+      userProfileImage: _profileImage,
+      stdCode: phoneToSend.isEmpty ? null : stdCodeToSend,
+    );
+
+    stopLoading();
+
+    if (!mounted) return;
+
+    result.fold(
+      (failure) {
+        CustomSnackbar.error(
+          context,
+          title: 'Profile Setup Failed',
+          message: failure.message,
+        );
+      },
+      (profile) async {
+        await sl<SessionService>().saveProfileComplete(true);
+        // Signup is done with the picked account — drop it so the next
+        // signup on this device can't inherit this user's name/photo.
+        sl<GoogleAccountPickerService>().clearLastPicked();
+        if (!mounted) return;
+        CustomSnackbar.success(
+          context,
+          title: 'Success',
+          message: 'Profile created successfully.',
+        );
+        context.go(AppRoutes.dashboard);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    Screen().adaptDeviceScreenSize(context);
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final confirmed = await LogoutDialog.show(context);
+        if (confirmed == true && context.mounted) {
+          await sl<ContentCompletionService>().clearForLogout();
+          // Revoke server-side first — it needs the refresh token that
+          // clearToken deletes.
+          await sl<TokenRefreshService>().revokeSession();
+          await sl<SessionService>().clearToken();
+          if (context.mounted) context.go(AppRoutes.login);
+        }
+      },
+      child: Scaffold(
+        body: Container(
+          width: Screen.width,
+          height: Screen.height,
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            // image: DecorationImage(
+            //   image: AssetImage(AppImages.accountSetupBackground),
+            //   fit: BoxFit.cover,
+            // ),
+          ),
+          child: SafeArea(
+            child: Column(
+              children: [
+                // App Bar
+                Padding(
+                  padding: Screen.getPadding(horizontal: 5),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        icon: Icon(
+                          Icons.arrow_back_ios,
+                          color: AppColors.textPrimary,
+                        ),
+                        onPressed: () async {
+                          final confirmed = await LogoutDialog.show(context);
+                          if (confirmed == true && context.mounted) {
+                            await sl<ContentCompletionService>()
+                                .clearForLogout();
+                            await sl<TokenRefreshService>().revokeSession();
+                            await sl<SessionService>().clearToken();
+                            if (context.mounted) context.go(AppRoutes.login);
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'Setup your Profile',
+                          overflow: TextOverflow.ellipsis,
+                          style: AppTypography.h5SemiBold.copyWith(
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Scrollable Form
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: ResponsiveHelper.of(
+                            context,
+                          ).maxContentWidth,
+                        ),
+                        child: Padding(
+                          padding: Screen.getPadding(all: AppSizes.paddingL),
+                          child: Form(
+                            key: _formKey,
+                            child: Column(
+                              children: [
+                                // Profile Picture
+                                _ProfilePicturePicker(
+                                  image: _profileImage,
+                                  onTap: _pickImage,
+                                ),
+                                SizedBox(height: Screen.getVerticalSize(24)),
+
+                                // Email — locked + pre-filled when the user
+                                // signed up via email (it's already
+                                // verified); a Google account picker (no
+                                // typed field) when they signed up via
+                                // phone, so there's nothing left to typo.
+                                _FormLabel(
+                                  label: widget.isPhone
+                                      ? 'Email Address'
+                                      : 'Email Address (verified)',
+                                  isRequired: true,
+                                ),
+                                SizedBox(height: Screen.getVerticalSize(8)),
+                                if (widget.isPhone)
+                                  GoogleEmailPickerField(
+                                    email: _emailController.text,
+                                    isLoading: _isPickingGoogleEmail,
+                                    onPick: _handlePickGoogleEmail,
+                                  )
+                                else
+                                  CustomTextFormField(
+                                    controller: _emailController,
+                                    hintText: 'Enter here',
+                                    keyboardType: TextInputType.emailAddress,
+                                    enabled: false,
+                                  ),
+                                SizedBox(height: Screen.getVerticalSize(16)),
+
+                                // Full Name
+                                const _FormLabel(label: 'Full Name', isRequired: true),
+                                SizedBox(height: Screen.getVerticalSize(8)),
+                                CustomTextFormField(
+                                  controller: _nameController,
+                                  hintText: 'Enter here',
+                                  validator: (value) {
+                                    if (value == null || value.isEmpty) {
+                                      return 'Please enter your full name';
+                                    }
+                                    return null;
+                                  },
+                                ),
+
+                                SizedBox(height: Screen.getVerticalSize(16)),
+
+                                // Phone — only collected for the email-signup
+                                // branch. Optional: empty value is fine, the
+                                // user can add a phone later via edit-profile.
+                                if (!widget.isPhone) ...[
+                                  const _FormLabel(label: 'Phone Number'),
+                                  SizedBox(height: Screen.getVerticalSize(8)),
+                                  PhoneInputField(
+                                    controller: _phoneController,
+                                    initialCountry: _phoneCountry,
+                                    onCountryChanged: (country) {
+                                      setState(() => _phoneCountry = country);
+                                    },
+                                  ),
+                                  SizedBox(height: Screen.getVerticalSize(16)),
+                                ],
+
+                                // Date of Birth
+                                const _FormLabel(label: 'Date of Birth'),
+                                SizedBox(height: Screen.getVerticalSize(8)),
+                                _DateField(
+                                  selectedDate: _selectedDate,
+                                  onTap: () => _selectDate(context),
+                                  formatDate: _formatDate,
+                                ),
+
+                                SizedBox(height: Screen.getVerticalSize(16)),
+                                // Gender
+                                const _FormLabel(label: 'Gender', isRequired: true),
+                                SizedBox(height: Screen.getVerticalSize(10)),
+                                _GenderSelector(
+                                  selectedGender: _selectedGender,
+                                  onGenderChanged: (gender) {
+                                    setState(() => _selectedGender = gender);
+                                  },
+                                ),
+                                SizedBox(height: Screen.getVerticalSize(36)),
+
+                                // Continue Button
+                                SizedBox(
+                                  child: CustomActionButton(
+                                    onTap:
+                                        (startLoading, stopLoading, btnState) {
+                                          _handleContinue(
+                                            startLoading,
+                                            stopLoading,
+                                          );
+                                        },
+                                    name: 'Continue',
+                                    isFormFilled: true,
+                                  ),
+                                ),
+                                SizedBox(height: Screen.getVerticalSize(24)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Profile Picture Picker
+// ─────────────────────────────────────────────────────────────
+class _ProfilePicturePicker extends StatelessWidget {
+  final File? image;
+  final VoidCallback onTap;
+
+  const _ProfilePicturePicker({required this.image, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Stack(
+        children: [
+          CircleAvatar(
+            radius: 55,
+            backgroundColor: AppColors.grey200.withValues(alpha: 0.5),
+            backgroundImage: image != null ? FileImage(image!) : null,
+            child: image == null
+                ? Icon(
+                    Icons.person,
+                    size: 60,
+                    color: AppColors.grey300.withValues(alpha: 0.8),
+                  )
+                : null,
+          ),
+          Positioned(
+            bottom: 0,
+            right: 0,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.primaryFill,
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.white, width: 2),
+              ),
+              child: Icon(
+                Icons.edit_outlined,
+                size: 16,
+                color: AppColors.onPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Form Label
+// ─────────────────────────────────────────────────────────────
+class _FormLabel extends StatelessWidget {
+  final String label;
+  final bool isRequired;
+
+  const _FormLabel({required this.label, this.isRequired = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final style = AppTypography.labelLarge.copyWith(
+      color: AppColors.textPrimary,
+      fontWeight: FontWeight.w500,
+    );
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text.rich(
+        TextSpan(
+          text: label,
+          style: style,
+          children: [
+            if (isRequired)
+              TextSpan(
+                text: ' *',
+                style: style.copyWith(color: AppColors.error),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Date Field — styled to match CustomTextFormField
+// ─────────────────────────────────────────────────────────────
+class _DateField extends StatelessWidget {
+  final DateTime? selectedDate;
+  final VoidCallback onTap;
+  final String Function(DateTime?) formatDate;
+
+  const _DateField({
+    required this.selectedDate,
+    required this.onTap,
+    required this.formatDate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isFilled = selectedDate != null;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(24),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          filled: true,
+          fillColor: AppColors.white,
+          prefix: const SizedBox(width: 4),
+          suffixIcon: Icon(
+            Icons.calendar_month_outlined,
+            color: AppColors.grey400,
+            size: 20,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(24),
+            borderSide: BorderSide(
+              color: isFilled ? AppColors.primary : AppColors.grey300,
+            ),
+          ),
+        ),
+        child: Text(
+          formatDate(selectedDate),
+          style: AppTypography.bodyTextLargeMedium.copyWith(
+            color: isFilled ? AppColors.textPrimary : AppColors.grey500,
+            fontSize: Screen.getFontSize(14),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Gender Selector
+// ─────────────────────────────────────────────────────────────
+class _GenderSelector extends StatelessWidget {
+  final String? selectedGender;
+  final Function(String) onGenderChanged;
+
+  const _GenderSelector({
+    required this.selectedGender,
+    required this.onGenderChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: Screen.getHorizontalSize(10),
+      runSpacing: Screen.getVerticalSize(10),
+      children: [
+        _GenderOption(
+          label: 'Male',
+          isSelected: selectedGender == 'Male',
+          onTap: () => onGenderChanged('Male'),
+        ),
+        _GenderOption(
+          label: 'Female',
+          isSelected: selectedGender == 'Female',
+          onTap: () => onGenderChanged('Female'),
+        ),
+        _GenderOption(
+          label: 'Other',
+          isSelected: selectedGender == 'Other',
+          onTap: () => onGenderChanged('Other'),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Gender Option
+// ─────────────────────────────────────────────────────────────
+class _GenderOption extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _GenderOption({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: AppSizes.borderRadiusCircle,
+      child: Container(
+        height: Screen.getVerticalSize(45),
+        padding: Screen.getPadding(
+          horizontal: AppSizes.paddingM,
+          vertical: AppSizes.paddingXS,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.white.withValues(alpha: 0.6),
+          borderRadius: AppSizes.borderRadiusCircle,
+          border: Border.all(
+            color: isSelected ? AppColors.primary : AppColors.grey300,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isSelected ? AppColors.primary : AppColors.grey300,
+                  width: isSelected ? 5 : 1.5,
+                ),
+              ),
+            ),
+            SizedBox(width: Screen.getHorizontalSize(8)),
+            Text(
+              label,
+              style: AppTypography.bodyTextMedium.copyWith(
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

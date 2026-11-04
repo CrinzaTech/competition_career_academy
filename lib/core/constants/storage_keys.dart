@@ -1,0 +1,64 @@
+/// Keys used for persistent storage (secure storage, shared prefs, etc.).
+///
+/// Centralising keys here avoids typos and makes it easy to audit everything
+/// that gets written to the device.
+class StorageKeys {
+  StorageKeys._();
+
+  // ============================================================
+  // Auth
+  // ============================================================
+  static const String accessToken = 'access_token';
+
+  /// Opaque refresh token minted alongside the access token at
+  /// `verify-otp-v2`. Rotated on every `refresh-token` call — the value
+  /// stored here is always the newest one, because presenting a retired
+  /// token outside the server's grace window trips reuse detection and
+  /// revokes the whole family.
+  ///
+  /// Absent means a session that predates this flow (or a login where the
+  /// backend failed to persist one). Such a session still works until its
+  /// access token expires; it just cannot renew itself.
+  static const String refreshToken = 'refresh_token';
+
+  /// 'true'/'false' flag for whether the mandatory post-OTP profile
+  /// setup form has been completed. Written to `false` the moment a
+  /// new-user token is saved (before setup-profile is shown) so the
+  /// gate survives app kill / cache-clear between OTP verification
+  /// and form submission. Absent (null) is treated as complete, since
+  /// existing sessions created before this flag existed never wrote it.
+  static const String profileComplete = 'profile_complete';
+
+  // ============================================================
+  // Appearance
+  // ============================================================
+  /// Persisted light/dark preference — one of `light`, `dark`, or
+  /// `system`. Absent means the user has never chosen, which resolves
+  /// to `system`. Deliberately NOT cleared on logout: appearance is a
+  /// device preference, not session state.
+  static const String themeMode = 'theme_mode';
+
+  /// File name (not path) of the student's custom app background, inside
+  /// `<app documents>/wallpaper/`. Only the name is stored because iOS
+  /// moves the app container on update, which would strand an absolute
+  /// path. Absent means no background. Unlike [themeMode] this IS cleared
+  /// on logout — it is a personal photo, and the device may be shared.
+  static const String wallpaperFile = 'wallpaper_file';
+
+  /// Which background is active: `none`, `theme` or `custom`. Absent means
+  /// `theme` (the bundled default). Cleared on logout with [wallpaperFile].
+  static const String wallpaperMode = 'wallpaper_mode';
+
+  // ============================================================
+  // Push notifications
+  // ============================================================
+  static const String fcmToken = 'fcm_token';
+
+  // ============================================================
+  // Chat (dedicated chat JWT for the SignalR hub + chat-group APIs).
+  // Distinct from [accessToken] — minted via /api/v1/generate-token-v2
+  // using the main token, then carried in the Authorization header of
+  // every chat-group REST call and as the SignalR accessTokenFactory.
+  // ============================================================
+  static const String chatToken = 'chat_token';
+}
