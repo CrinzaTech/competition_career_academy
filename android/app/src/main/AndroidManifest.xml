@@ -11,7 +11,7 @@
              device). Spelled out in full, this cannot drift from the Kotlin
              package declaration. -->
         <activity
-            android:name="com.samd.brt.MainActivity"
+            android:name="co.crz.poc.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""

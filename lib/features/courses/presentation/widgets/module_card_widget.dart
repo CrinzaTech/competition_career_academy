@@ -8,6 +8,7 @@ import 'package:competition_career_academy/core/theme/app_sizes.dart';
 import 'package:competition_career_academy/core/theme/app_typography.dart';
 import 'package:competition_career_academy/core/theme/responsive_helper.dart';
 import 'package:competition_career_academy/core/theme/screen.dart';
+import 'package:competition_career_academy/core/utils/document_opener.dart';
 import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
 import 'package:competition_career_academy/features/courses/data/models/course_model.dart';
 import 'package:competition_career_academy/features/courses/data/models/live_class_models.dart';
@@ -20,7 +21,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// Tile for an individual content node — folder, video, image, document,
 /// zip, or assignment.
@@ -112,7 +112,9 @@ class ModuleCard extends StatelessWidget {
     // Also hidden when every item in the folder is already open (Free
     // Content, or a fully unlocked folder) — "free" only means something
     // next to items that aren't.
-    final freeCount = module.isFolder && coursePurchasedId == 0 &&
+    final freeCount =
+        module.isFolder &&
+            coursePurchasedId == 0 &&
             module.freeContentCount < module.visibleContentCount
         ? module.freeContentCount
         : 0;
@@ -198,53 +200,25 @@ class ModuleCard extends StatelessWidget {
             );
           } else if (module.type == CourseContentType.document &&
               module.pdfUrl != null) {
-            final path = Uri.tryParse(module.pdfUrl!)?.path.toLowerCase() ?? '';
-            if (path.endsWith('.doc') ||
-                path.endsWith('.docx') ||
-                path.endsWith('.xls') ||
-                path.endsWith('.xlsx') ||
-                path.endsWith('.ppt') ||
-                path.endsWith('.pptx')) {
-              if (coursePurchasedId != 0 && module.nodeId.isNotEmpty) {
-                sl<ContentCompletionService>().markCompleted(
-                  coursePurchasedId: coursePurchasedId,
-                  jsonContentId: module.nodeId,
-                );
-              }
-              final officeUrl =
-                  'https://view.officeapps.live.com/op/view.aspx?src=${Uri.encodeComponent(module.pdfUrl!)}';
-              context.push(
-                '${AppRoutes.documentViewer}'
-                '?title=${Uri.encodeComponent(module.nodeName)}'
-                '&url=${Uri.encodeComponent(officeUrl)}',
-              );
-            } else if (path.endsWith('.pdf')) {
-              context.push(
-                '${AppRoutes.pdfViewer}'
-                '?title=${Uri.encodeComponent(module.nodeName)}'
-                '&url=${Uri.encodeComponent(module.pdfUrl!)}'
-                '$completionArgs',
-              );
-            } else {
-              if (coursePurchasedId != 0 && module.nodeId.isNotEmpty) {
-                sl<ContentCompletionService>().markCompleted(
-                  coursePurchasedId: coursePurchasedId,
-                  jsonContentId: module.nodeId,
-                );
-              }
-              if (module.pdfUrl!.toLowerCase().startsWith('http')) {
-                context.push(
-                  '${AppRoutes.documentViewer}'
-                  '?title=${Uri.encodeComponent(module.nodeName)}'
-                  '&url=${Uri.encodeComponent(module.pdfUrl!)}',
-                );
-              } else {
-                launchUrl(
-                  Uri.parse(module.pdfUrl!),
-                  mode: LaunchMode.externalApplication,
-                );
-              }
-            }
+            // PDFs → native viewer (tracks completion itself). Word /
+            // Excel / PowerPoint → Office Online viewer. Detection also
+            // covers extension-less signed/proxy URLs (see
+            // DocumentOpener) — the old path-suffix check sent those
+            // raw into the WebView, which renders blank on Android.
+            DocumentOpener.open(
+              context,
+              url: module.pdfUrl!,
+              title: module.nodeName,
+              pdfQuery: completionArgs,
+              onNonPdfOpened: () {
+                if (coursePurchasedId != 0 && module.nodeId.isNotEmpty) {
+                  sl<ContentCompletionService>().markCompleted(
+                    coursePurchasedId: coursePurchasedId,
+                    jsonContentId: module.nodeId,
+                  );
+                }
+              },
+            );
           } else if ((module.type == CourseContentType.video ||
                   module.type == CourseContentType.youtube) &&
               module.primaryUrl != null) {
@@ -570,8 +544,7 @@ class ModuleCard extends StatelessWidget {
           return;
         }
         if (!context.mounted) return;
-        final processing =
-            recording.status == LiveRecordingStatus.processing;
+        final processing = recording.status == LiveRecordingStatus.processing;
         CustomSnackbar.info(
           context,
           title: processing ? 'Recording processing' : 'Recording unavailable',

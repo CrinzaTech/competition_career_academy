@@ -82,8 +82,10 @@ class _PdfViewerPageState extends State<PdfViewerPage> {
           widget.url,
           controller: _controller,
           canShowScrollHead: false,
-          // Page-per-screen layout, allow pinch/double-tap zoom.
-          pageLayoutMode: PdfPageLayoutMode.single,
+          // Continuous pages, scrolled top-to-bottom (not swiped
+          // sideways one page at a time); pinch/double-tap zoom stays.
+          pageLayoutMode: PdfPageLayoutMode.continuous,
+          scrollDirection: PdfScrollDirection.vertical,
           initialZoomLevel: 1.0,
           maxZoomLevel: 4.0,
           enableDoubleTapZooming: true,

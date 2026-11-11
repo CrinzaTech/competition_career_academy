@@ -2,13 +2,13 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:competition_career_academy/core/config/di/dependency_injection.dart';
-import 'package:competition_career_academy/core/router/app_routes.dart';
 import 'package:competition_career_academy/core/services/content_completion_service.dart';
 import 'package:competition_career_academy/core/theme/app_colors.dart';
 import 'package:competition_career_academy/core/theme/app_sizes.dart';
 import 'package:competition_career_academy/core/theme/app_typography.dart';
 import 'package:competition_career_academy/core/theme/responsive_helper.dart';
 import 'package:competition_career_academy/core/theme/screen.dart';
+import 'package:competition_career_academy/core/utils/document_opener.dart';
 import 'package:competition_career_academy/core/widgets/custom_appbar_widget.dart';
 import 'package:competition_career_academy/core/widgets/custom_network_image.dart';
 import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
@@ -17,9 +17,7 @@ import 'package:competition_career_academy/features/assignment/presentation/bloc
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 /// Assignment screen — fetches the assignment for a curriculum node,
 /// shows the question content (PDF/image), lets the user submit a
@@ -235,40 +233,15 @@ class _AssignmentViewState extends State<_AssignmentView> {
     final url = a.contentUrl;
     if (url == null || url.isEmpty) return;
 
-    final path = Uri.tryParse(url)?.path.toLowerCase() ?? '';
-    if (path.endsWith('.doc') ||
-        path.endsWith('.docx') ||
-        path.endsWith('.xls') ||
-        path.endsWith('.xlsx') ||
-        path.endsWith('.ppt') ||
-        path.endsWith('.pptx')) {
-      final officeUrl =
-          'https://view.officeapps.live.com/op/view.aspx?src=${Uri.encodeComponent(url)}';
-      context.push(
-        '${AppRoutes.documentViewer}'
-        '?title=${Uri.encodeComponent(a.title)}'
-        '&url=${Uri.encodeComponent(officeUrl)}',
-      );
-    } else if (path.endsWith('.pdf') || a.resolvedContentType == 'image') {
-      // Both image and PDF nodes route to the PDF viewer — it embeds via
-      // the same scaffold and avoids a one-off image-viewer page.
-      context.push(
-        '${AppRoutes.pdfViewer}'
-        '?title=${Uri.encodeComponent(a.title)}'
-        '&url=${Uri.encodeComponent(url)}',
-        extra: {'showActions': false},
-      );
-    } else {
-      if (url.toLowerCase().startsWith('http')) {
-        context.push(
-          '${AppRoutes.documentViewer}'
-          '?title=${Uri.encodeComponent(a.title)}'
-          '&url=${Uri.encodeComponent(url)}',
-        );
-      } else {
-        launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-      }
-    }
+    // Shared detector: handles .doc/.docx/.xls/.ppt (Office viewer),
+    // PDFs and images (PDF viewer route), and extension-less signed
+    // URLs via a header probe.
+    DocumentOpener.open(
+      context,
+      url: url,
+      title: a.title,
+      pdfExtra: {'showActions': false},
+    );
   }
 
   @override
@@ -1230,11 +1203,13 @@ void _openSubmission(BuildContext context, String url, String assignmentTitle) {
   final title = assignmentTitle.isEmpty
       ? 'Submission'
       : '$assignmentTitle Submission';
-  context.push(
-    '${AppRoutes.pdfViewer}'
-    '?title=${Uri.encodeComponent(title)}'
-    '&url=${Uri.encodeComponent(url)}',
-    extra: {'showActions': false},
+  // A .docx submission would fail in the PDF viewer — let the shared
+  // opener pick the right viewer.
+  DocumentOpener.open(
+    context,
+    url: url,
+    title: title,
+    pdfExtra: {'showActions': false},
   );
 }
 

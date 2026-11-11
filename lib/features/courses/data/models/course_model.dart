@@ -35,9 +35,23 @@ enum CourseContentType {
         return CourseContentType.youtube;
       case 'image':
         return CourseContentType.image;
+      // Anything file-like must land here — the `default` below turns
+      // unknown types into folders, which made Word/Excel nodes
+      // un-openable when the backend sent e.g. `docx` or `word`.
       case 'document':
       case 'pdf':
       case 'doc':
+      case 'docx':
+      case 'word':
+      case 'xls':
+      case 'xlsx':
+      case 'excel':
+      case 'sheet':
+      case 'ppt':
+      case 'pptx':
+      case 'powerpoint':
+      case 'presentation':
+      case 'file':
         return CourseContentType.document;
       case 'zip':
         return CourseContentType.zip;

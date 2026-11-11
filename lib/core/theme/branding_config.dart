@@ -508,18 +508,18 @@ const crinestaBranding = BrandingConfig(
   splashBackground: 'assets/images/backgrounds/splash_background.png',
   loginBackground: 'assets/images/backgrounds/login_background.png',
   appName: 'COMPETITION CAREER ACADEMY',
-  packageName: 'com.samd.brt',
+  packageName: 'co.crz.poc',
   // ── Tile Theme ──────────────────────────────────────────────────
   // Mirrors the values that were previously in .env.
   // Flip any flag here to change the tile visual style at build time.
-  tileBgFill: false,
+  tileBgFill: true,
   tileFullLength: false,
-  tileDark: false,
+  tileDark: true,
   textGradient: true,
   
   // ── Tile Only-Icon Theme ──────────────────────────────────
   // ───────
-  tileOnlyIcon: true,
+  tileOnlyIcon: false,
   tile3x3: false,
   tileBg: false,
   tileBgDark: false,

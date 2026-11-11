@@ -51,7 +51,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.samd.brt"
+    namespace = "co.crz.poc"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -63,7 +63,7 @@ android {
 
     defaultConfig {
         // Todo: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.samd.brt"
+        applicationId = "co.crz.poc"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

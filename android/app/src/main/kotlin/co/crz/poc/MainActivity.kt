@@ -1,4 +1,4 @@
-package com.samd.brt
+package co.crz.poc
 
 import android.os.Bundle
 import android.provider.Settings

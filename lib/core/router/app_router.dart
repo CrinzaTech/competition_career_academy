@@ -360,7 +360,11 @@ class AppRouter {
               body: Center(child: Text('No document URL provided')),
             );
           }
-          return DocumentViewerPage(title: title, url: url);
+          return DocumentViewerPage(
+            title: title,
+            url: url,
+            externalUrl: state.uri.queryParameters['externalUrl'],
+          );
         },
       ),
       GoRoute(
