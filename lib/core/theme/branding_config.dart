@@ -370,6 +370,19 @@ class BrandingConfig {
   /// [pngBg] is true.
   final bool pngBgDark;
 
+  /// The uploaded tile image is a wide, card-shaped picture (artwork plus
+  /// its own label baked in) rather than a square icon.
+  ///
+  /// A bare icon (Tile_Bg off) gets a square cell, so a landscape image
+  /// fitted into it leaves a large empty band above and below. With this on
+  /// the cell takes the image's landscape shape instead
+  /// ([wideTileImageAspectRatio], width ÷ height) and the image fills the
+  /// cell's full width, so rows sit tight with no dead space.
+  ///
+  /// Only meaningful when [tileOnlyIcon] is true, [tileBg] and [tileBgFill]
+  /// are false, and [tileBig] is off.
+  final bool tileWideImage;
+
   // ── Home ───────────────────────────────────────────────────────────
 
   /// Show the Discover tab on Home: the row of quick-access icons (Live
@@ -447,6 +460,7 @@ class BrandingConfig {
     this.tileBannerSquare = false,
     this.pngBg = false,
     this.pngBgDark = false,
+    this.tileWideImage = false,
     // Home
     this.showDiscoverTab = true,
     // Payment
@@ -534,6 +548,10 @@ const crinestaBranding = BrandingConfig(
   pngBg: true,
   pngBgDark: false,
 
+  // true → the tile image is a wide card-shaped picture; the cell takes its
+  // landscape shape instead of a square. See the field doc on BrandingConfig.
+  tileWideImage: false,
+
   // ── Home ────────────────────────────────────────────────────────
   // true → show the Discover tab (icon row under the banner + the pinned
   // bar); false → hide it. See the field doc on BrandingConfig.
@@ -550,4 +568,10 @@ const crinestaBranding = BrandingConfig(
 /// To onboard a new client: add a new `BrandingConfig` constant above
 /// (mirroring [crinestaBranding]'s shape), then change this single
 /// line to point at it. Nothing else in the codebase needs to know.
+/// Width ÷ height of the cell a [BrandingConfig.tileWideImage] tile gets.
+/// Matches a ~2:1 card-shaped upload; the image is drawn with
+/// `BoxFit.contain`, so a slightly different ratio just leaves a hairline
+/// margin rather than cropping.
+const double wideTileImageAspectRatio = 2.0;
+
 const BrandingConfig currentBranding = crinestaBranding;

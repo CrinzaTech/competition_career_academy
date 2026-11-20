@@ -707,10 +707,16 @@ class CategorySection extends StatelessWidget {
                     !tileBig &&
                     !currentBranding.tileBgFill &&
                     !currentBranding.tileBg;
+                // Tile_Wide_Image: a landscape, card-shaped upload takes a
+                // cell of its own shape instead of a square one, so it is
+                // not left floating in empty space above and below.
+                final double bareImageHeight = currentBranding.tileWideImage
+                    ? cellWidth / wideTileImageAspectRatio
+                    : cellWidth;
                 final double cellHeight = tileBig
                     ? cellWidth
                     : bareIcon
-                    ? cellWidth +
+                    ? bareImageHeight +
                           (showText
                               ? iconMetrics.gap + iconMetrics.labelHeight
                               : 0)
@@ -905,6 +911,7 @@ class _CategoryCard extends StatelessWidget {
             tileBgDark: tileBgDark,
             pngBg: pngBg,
             pngBgDark: pngBgDark,
+            wideImage: currentBranding.tileWideImage,
             onTap: onTap,
           );
   }
@@ -930,6 +937,7 @@ class _DefaultCard extends StatelessWidget {
   final bool tileBgDark;
   final bool pngBg;
   final bool pngBgDark;
+  final bool wideImage;
   final VoidCallback? onTap;
 
   const _DefaultCard({
@@ -948,6 +956,7 @@ class _DefaultCard extends StatelessWidget {
     this.tileBgDark = false,
     this.pngBg = false,
     this.pngBgDark = false,
+    this.wideImage = false,
     this.onTap,
   });
 
@@ -1225,10 +1234,12 @@ class _DefaultCard extends StatelessWidget {
           final double side = constraints.maxWidth < availH
               ? constraints.maxWidth
               : availH;
+          // Tile_Wide_Image: the cell already has the image's landscape
+          // shape, so the image takes the full width rather than a square.
           return buildTile(
             SizedBox(
-              height: side,
-              width: side,
+              height: wideImage ? availH : side,
+              width: wideImage ? constraints.maxWidth : side,
               child: CustomNetworkImage(
                 url: tile.tileLogoURL,
                 fit: BoxFit.contain,
