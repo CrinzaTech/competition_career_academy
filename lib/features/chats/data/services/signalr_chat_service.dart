@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:competition_career_academy/core/network/auth_interceptor.dart';
 import 'package:competition_career_academy/core/session/session_service.dart';
 import 'package:competition_career_academy/features/chats/data/models/chat_message_model.dart';
 import 'package:competition_career_academy/features/direct_chat/data/models/dm_conversation_model.dart';
@@ -290,6 +291,10 @@ class SignalRChatService {
     connection.on('DirectUserStoppedTyping', _handleDirectUserStoppedTyping);
     connection.on('DirectMessagesRead', _handleDirectMessagesRead);
     connection.on('DirectConversationBlockChanged', _handleDirectBlockChanged);
+
+    // An admin reset this learner's devices or blocked them. The next HTTP
+    // call would 401 anyway; this makes it immediate while chat is open.
+    connection.on('ForceLogout', _handleForceLogout);
 
     // On automatic reconnect, rejoin the room the user was viewing so
     // they don't have to back-and-re-enter to resume receiving events.
@@ -665,6 +670,16 @@ class SignalRChatService {
         readAt: readAt,
       ),
     );
+  }
+
+  void _handleForceLogout(List<Object?>? args) {
+    debugPrint('$_kChatLogTag <- ForceLogout args=$args');
+    final payload = (args != null && args.isNotEmpty && args.first is Map)
+        ? args.first as Map
+        : const {};
+    final code = payload['code']?.toString() ?? 'session_revoked';
+    final message = payload['message']?.toString();
+    AuthInterceptor.endSessionFromServer(code, message);
   }
 
   void _handleError(List<Object?>? args) {

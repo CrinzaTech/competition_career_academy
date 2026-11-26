@@ -12,11 +12,13 @@ class CreateOrderUseCase {
     required int courseId,
     required int priceId,
     String? couponCode,
+    String? termsHash,
   }) {
     return repository.createOrder(
       courseId: courseId,
       priceId: priceId,
       couponCode: couponCode,
+      termsHash: termsHash,
     );
   }
 }

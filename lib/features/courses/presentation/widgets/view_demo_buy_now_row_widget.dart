@@ -4,6 +4,7 @@ import 'package:competition_career_academy/core/router/app_routes.dart';
 import 'package:competition_career_academy/core/services/whatsapp_payment_request_service.dart';
 import 'package:competition_career_academy/core/widgets/celebration_overlay.dart';
 import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
+import 'package:competition_career_academy/core/widgets/terms_acceptance_sheet.dart';
 import 'package:competition_career_academy/features/courses/data/models/course_model.dart';
 import 'package:competition_career_academy/features/payment/data/models/payment_model.dart';
 import 'package:competition_career_academy/features/payment/presentation/bloc/payment_cubit.dart';
@@ -341,6 +342,96 @@ class ViewDemoBuyNowRowInnerState extends State<ViewDemoBuyNowRowInner> {
     });
   }
 
+  /// Latches while the Terms & Conditions sheet is up, so a pricing
+  /// re-emission can't stack a second one on top.
+  bool _termsSheetOpen = false;
+
+  /// Pricing breakdown landed → (terms popup, when the course has terms)
+  /// → enrolment sheet. The sheet's Proceed button kicks off create-order
+  /// on PaymentCubit.
+  Future<void> _onPricingLoaded(CoursePricing pricing) async {
+    if (_enrolmentSheetOpen || _termsSheetOpen) return;
+    final pricingCubit = context.read<CoursePricingCubit>();
+
+    // Terms & Conditions come first — before the order summary, and before
+    // the iOS free-enrol tap below. The server only sends terms when the
+    // org feature is on, the course switch is on and the text isn't blank,
+    // and it refuses create-order without this acceptance.
+    final termsHash = pricing.hasTerms ? pricing.termsHash : null;
+    if (pricing.hasTerms) {
+      _termsSheetOpen = true;
+      final agreed = await TermsAcceptanceSheet.show(
+        context,
+        terms: pricing.terms!,
+      );
+      _termsSheetOpen = false;
+      if (!mounted) return;
+      if (!agreed) {
+        // Reset so the next Buy Now tap re-fires this listener (Bloc
+        // suppresses identical states).
+        pricingCubit.reset();
+        return;
+      }
+    }
+
+    // iOS: no order summary, coupon or swipe-to-unlock —
+    // App Review reads all of it as checkout, even at ₹0.
+    // A free course is enrolled on the tap; anything that
+    // turns out chargeable is simply unavailable.
+    if (!PaymentPolicy.allowsPurchases) {
+      pricingCubit.reset();
+      if (pricing.totalPayable > 0) {
+        _showPricingError(PaymentPolicy.unavailableMessage);
+        return;
+      }
+      context.read<PaymentCubit>().createOrder(
+        courseId: widget.courseId,
+        priceId: pricing.coursePriceId,
+        termsHash: termsHash,
+      );
+      return;
+    }
+    _enrolmentSheetOpen = true;
+    final paymentCubit = context.read<PaymentCubit>();
+    EnrollmentBottomSheet.show(
+      context,
+      courseId: widget.courseId,
+      cubit: pricingCubit,
+      // v2 derives the chargeable amount server-side from
+      // `(courseId, priceId)` so we forward the tier id
+      // the pricing breakdown was bound to — amount is calculated
+      // on the backend, but we pass the coupon code if applied.
+      onProceed: (current) {
+        // WhatsApp-request deployments never open Razorpay
+        // for a chargeable course — the org collects the
+        // money off-app. A zero total still goes through
+        // create-order, because that is what enrols the
+        // student in a free course; there is nothing to
+        // ask WhatsApp for.
+        if (currentBranding.isPaymentRequestOnWhatsapp &&
+            current.totalPayable > 0) {
+          _requestPaymentOnWhatsapp(
+            current,
+            pricingCubit.appliedCouponCode,
+          );
+          return;
+        }
+        paymentCubit.createOrder(
+          courseId: widget.courseId,
+          priceId: current.coursePriceId,
+          couponCode: pricingCubit.appliedCouponCode,
+          // A coupon re-fetch carries the terms again; prefer its hash so
+          // an edit made meanwhile is caught by the server, not hidden.
+          termsHash: current.hasTerms ? current.termsHash : termsHash,
+        );
+      },
+    ).whenComplete(() {
+      _enrolmentSheetOpen = false;
+      if (!mounted) return;
+      pricingCubit.reset();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MultiBlocListener(
@@ -384,62 +475,7 @@ class ViewDemoBuyNowRowInnerState extends State<ViewDemoBuyNowRowInner> {
         BlocListener<CoursePricingCubit, CoursePricingState>(
           listener: (context, state) {
             state.maybeWhen(
-              loaded: (pricing) {
-                if (_enrolmentSheetOpen) return;
-                // iOS: no order summary, coupon or swipe-to-unlock —
-                // App Review reads all of it as checkout, even at ₹0.
-                // A free course is enrolled on the tap; anything that
-                // turns out chargeable is simply unavailable.
-                if (!PaymentPolicy.allowsPurchases) {
-                  context.read<CoursePricingCubit>().reset();
-                  if (pricing.totalPayable > 0) {
-                    _showPricingError(PaymentPolicy.unavailableMessage);
-                    return;
-                  }
-                  context.read<PaymentCubit>().createOrder(
-                    courseId: widget.courseId,
-                    priceId: pricing.coursePriceId,
-                  );
-                  return;
-                }
-                _enrolmentSheetOpen = true;
-                final paymentCubit = context.read<PaymentCubit>();
-                final pricingCubit = context.read<CoursePricingCubit>();
-                EnrollmentBottomSheet.show(
-                  context,
-                  courseId: widget.courseId,
-                  cubit: pricingCubit,
-                  // v2 derives the chargeable amount server-side from
-                  // `(courseId, priceId)` so we forward the tier id
-                  // the pricing breakdown was bound to — amount is calculated
-                  // on the backend, but we pass the coupon code if applied.
-                  onProceed: (current) {
-                    // WhatsApp-request deployments never open Razorpay
-                    // for a chargeable course — the org collects the
-                    // money off-app. A zero total still goes through
-                    // create-order, because that is what enrols the
-                    // student in a free course; there is nothing to
-                    // ask WhatsApp for.
-                    if (currentBranding.isPaymentRequestOnWhatsapp &&
-                        current.totalPayable > 0) {
-                      _requestPaymentOnWhatsapp(
-                        current,
-                        pricingCubit.appliedCouponCode,
-                      );
-                      return;
-                    }
-                    paymentCubit.createOrder(
-                      courseId: widget.courseId,
-                      priceId: current.coursePriceId,
-                      couponCode: pricingCubit.appliedCouponCode,
-                    );
-                  },
-                ).whenComplete(() {
-                  _enrolmentSheetOpen = false;
-                  if (!mounted) return;
-                  pricingCubit.reset();
-                });
-              },
+              loaded: _onPricingLoaded,
               error: _showPricingError,
               orElse: () {},
             );

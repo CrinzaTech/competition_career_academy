@@ -399,6 +399,10 @@ class ApiEndpoints {
   /// backend can stamp it onto the token claims.
   static const String generateChatToken = '/api/v1/generate-token-v2';
 
+  /// `GET` — 200 while the session is allowed; 401 `session_revoked` /
+  /// `account_blocked` after an admin reset or block. See SessionWatchdog.
+  static const String sessionCheck = '/api/v1/session-check';
+
   /// History for a chat room. The path id is the room id (string).
   /// Paged via `page` (1-indexed) and `pageSize` (default 50).
   static const String chatMessages = '/api/v1/chat-group/{groupId}/messages';

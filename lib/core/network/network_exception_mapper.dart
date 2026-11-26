@@ -18,6 +18,15 @@ Failure mapDioExceptionToFailure(DioException e) {
       final statusCode = e.response?.statusCode;
       final message = _extractServerMessage(e.response) ??
           'Server error (${statusCode ?? 'unknown'})';
+      // Terms & Conditions refusals come back as 400 with a `status`.
+      // Surfaced as 428 so checkout code can tell them apart from a
+      // real payment problem without parsing the message.
+      if (_isTermsRefusal(e.response)) {
+        return Failure.server(
+          message: message,
+          statusCode: termsRefusedStatusCode,
+        );
+      }
       return Failure.server(message: message, statusCode: statusCode);
     case DioExceptionType.cancel:
       return Failure.unknown(message: 'Request was cancelled.');
@@ -26,6 +35,17 @@ Failure mapDioExceptionToFailure(DioException e) {
     case DioExceptionType.unknown:
       return Failure.unknown(message: e.message ?? 'An unknown error occurred.');
   }
+}
+
+/// Pseudo status for a create-order refused over Terms & Conditions
+/// (`TERMS_REQUIRED` / `TERMS_CHANGED`). Never sent by the server itself.
+const int termsRefusedStatusCode = 428;
+
+bool _isTermsRefusal(Response? response) {
+  final data = response?.data;
+  if (data is! Map) return false;
+  final status = data['status'] ?? data['Status'];
+  return status == 'TERMS_REQUIRED' || status == 'TERMS_CHANGED';
 }
 
 /// Pulls a user-readable error string off the response body when the

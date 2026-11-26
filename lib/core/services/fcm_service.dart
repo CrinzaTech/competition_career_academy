@@ -8,6 +8,7 @@ import 'package:flutter/widgets.dart';
 
 import 'package:competition_career_academy/core/services/local_notification_service.dart';
 import 'package:competition_career_academy/core/session/session_service.dart';
+import 'package:competition_career_academy/core/session/session_watchdog.dart';
 import 'package:competition_career_academy/core/utils/utils.dart';
 import 'package:competition_career_academy/firebase_options.dart';
 
@@ -20,6 +21,9 @@ import 'package:competition_career_academy/firebase_options.dart';
 /// `data`-only push shows nothing on its own, so this handler raises a
 /// local notification for those — carrying the same payload, so a tap
 /// lands on the same deep link a `notification`+`data` push would.
+/// `data.type` of the silent push web_admin sends on a device reset or block.
+const String kForceLogoutPushType = 'force_logout';
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // The background isolate has its own memory — Firebase has to be
@@ -31,6 +35,11 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
       'title="${message.notification?.title}" data=${message.data}',
     );
   }
+
+  // Silent admin reset/block signal: nothing to show. This isolate can't
+  // touch the app's session or router, so the main isolate acts on it via
+  // SessionWatchdog when the app is next opened or resumed.
+  if (message.data['type'] == kForceLogoutPushType) return;
 
   // Only for data-only sends — when a `notification` block is present the
   // OS has already drawn the banner and posting our own would double it.
@@ -195,6 +204,12 @@ class FcmService {
       Utils.debugLog(
         'FCM foreground: id=${message.messageId} data=${message.data}',
       );
+      // web_admin reset this learner's devices or blocked them. Re-ask the
+      // server rather than trusting the push — see SessionWatchdog.
+      if (message.data['type'] == kForceLogoutPushType) {
+        SessionWatchdog.check(force: true, reason: 'force_logout push');
+        return;
+      }
       final notification = message.notification;
       final title = notification?.title ?? message.data['title'] as String?;
       final body = notification?.body ?? message.data['body'] as String?;

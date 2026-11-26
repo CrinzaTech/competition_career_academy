@@ -1,3 +1,4 @@
+import 'package:competition_career_academy/core/utils/drive_url.dart';
 enum CourseContentType {
   folder,
   video,
@@ -747,7 +748,11 @@ class CourseContent {
 
   // Backward-compat getters so existing call-sites don't need to change.
   String? get videoUrl => type == CourseContentType.video ? url : null;
-  String? get imageUrl => type == CourseContentType.image ? url : null;
+  /// Drive share links are rewritten to the direct image host — a
+  /// `/file/d/<id>/view` link is an HTML page, not an image.
+  String? get imageUrl => type == CourseContentType.image && url != null
+      ? driveDirectImageUrl(url!)
+      : null;
   String? get pdfUrl =>
       (type == CourseContentType.document || type == CourseContentType.zip)
       ? url
@@ -928,6 +933,18 @@ class CoursePricing {
   /// `0` when no coupon is applied.
   final double couponDiscountPercentageValue;
 
+  /// Markdown Terms & Conditions the learner must accept before
+  /// create-order. Null when none apply (org feature off, course switch
+  /// off, or blank text) — then no popup is shown.
+  final String? terms;
+
+  /// Echoed back to create-order with `termsAccepted: true`, so the server
+  /// can tell the learner agreed to this exact version.
+  final String? termsHash;
+
+  bool get hasTerms =>
+      terms != null && terms!.trim().isNotEmpty && termsHash != null;
+
   const CoursePricing({
     required this.courseId,
     required this.coursePriceId,
@@ -949,6 +966,8 @@ class CoursePricing {
     this.couponOfferAmount = 0,
     this.couponDiscountedRemainAmount = 0,
     this.couponDiscountPercentageValue = 0,
+    this.terms,
+    this.termsHash,
   });
 
   /// `true` when the backend returned a non-zero coupon discount —
@@ -1032,6 +1051,8 @@ class CoursePricing {
           (json['couponDiscountedRemainAmount'] as num?)?.toDouble() ?? 0.0,
       couponDiscountPercentageValue:
           (json['couponDiscountPercentageValue'] as num?)?.toDouble() ?? 0.0,
+      terms: json['terms'] as String?,
+      termsHash: json['termsHash'] as String?,
     );
   }
 }

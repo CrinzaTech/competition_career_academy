@@ -16,6 +16,10 @@ class FolderContentPage extends StatefulWidget {
   final int coursePurchasedId;
   final bool activateWatermark;
 
+  /// The org's Free Content page — Drive video/PDF links open in Drive's
+  /// embedded player there (see [ModuleCard.isFreeContent]).
+  final bool isFreeContent;
+
   /// A child to scroll to and highlight on arrival — the Home "Live
   /// classes" rail lands here for a nested live-class node. Null means
   /// the plain folder view.
@@ -27,6 +31,7 @@ class FolderContentPage extends StatefulWidget {
     required this.courseId,
     this.coursePurchasedId = 0,
     this.activateWatermark = false,
+    this.isFreeContent = false,
     this.focusNodeId,
   });
 
@@ -102,6 +107,7 @@ class _FolderContentPageState extends State<FolderContentPage> {
                   courseId: widget.courseId,
                   coursePurchasedId: widget.coursePurchasedId,
                   activateWatermark: widget.activateWatermark,
+                  isFreeContent: widget.isFreeContent,
                   highlighted: focused,
                 );
               },

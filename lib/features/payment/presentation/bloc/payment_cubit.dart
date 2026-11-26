@@ -20,12 +20,14 @@ class PaymentCubit extends SafeCubit<PaymentState> {
     required int courseId,
     required int priceId,
     String? couponCode,
+    String? termsHash,
   }) async {
     emit(const PaymentState.creatingOrder());
     final result = await createOrderUseCase(
       courseId: courseId,
       priceId: priceId,
       couponCode: couponCode,
+      termsHash: termsHash,
     );
     result.fold(
       (failure) => emit(PaymentState.error(failure.message)),

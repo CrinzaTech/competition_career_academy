@@ -24,7 +24,13 @@ abstract class BundleRepository {
 
   /// P1 — create or reuse the Razorpay order. **No amount is sent**: the
   /// server prices the bundle from the database.
-  Future<Either<Failure, BundleOrder>> createBundleOrder(int bundleId);
+  ///
+  /// [termsHash] — the bundle's termsHash, only once the learner agreed to
+  /// its Terms & Conditions; null when the bundle has none.
+  Future<Either<Failure, BundleOrder>> createBundleOrder(
+    int bundleId, {
+    String? termsHash,
+  });
 
   /// P2 — **the only thing that unlocks the courses.** The three ids go
   /// out exactly as Razorpay handed them over.

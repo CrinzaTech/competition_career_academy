@@ -25,6 +25,7 @@ import 'package:competition_career_academy/features/direct_chat/presentation/pag
 import 'package:competition_career_academy/features/direct_chat/presentation/pages/direct_chat_room_page.dart';
 import 'package:competition_career_academy/features/assignment/presentation/pages/assignment_page.dart';
 import 'package:competition_career_academy/features/exam/presentation/pages/exam_page.dart';
+import 'package:competition_career_academy/features/courses/presentation/pages/drive_embed_page.dart';
 import 'package:competition_career_academy/features/courses/presentation/pages/folder_content_page.dart';
 import 'package:competition_career_academy/features/courses/presentation/pages/pdf_viewer_page.dart';
 import 'package:competition_career_academy/features/courses/presentation/pages/image_viewer_page.dart';
@@ -340,7 +341,10 @@ class AppRouter {
           }
           final activateWatermark =
               state.uri.queryParameters['activateWatermark'] == 'true';
+          final isFreeContent =
+              state.uri.queryParameters['isFreeContent'] == 'true';
           return FolderContentPage(
+            isFreeContent: isFreeContent,
             folder: folder,
             courseId: courseId,
             coursePurchasedId: coursePurchasedId,
@@ -399,6 +403,36 @@ class AppRouter {
             title: title,
             url: url,
             showActions: showActions,
+            coursePurchasedId: coursePurchasedId,
+            nodeId: nodeId,
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.driveEmbed,
+        name: 'drive-embed',
+        builder: (context, state) {
+          final title = state.uri.queryParameters['title'] ?? 'Content';
+          final url = state.uri.queryParameters['url'] ?? '';
+          // Only Drive's own player may load here — the url comes from a
+          // query string, so anything else is refused.
+          final uri = Uri.tryParse(url);
+          if (uri == null ||
+              uri.scheme != 'https' ||
+              uri.host != 'drive.google.com') {
+            return const Scaffold(
+              body: Center(child: Text('No content URL provided')),
+            );
+          }
+          final coursePurchasedId =
+              int.tryParse(
+                state.uri.queryParameters['coursePurchasedId'] ?? '',
+              ) ??
+              0;
+          final nodeId = state.uri.queryParameters['nodeId'] ?? '';
+          return DriveEmbedPage(
+            title: title,
+            url: url,
             coursePurchasedId: coursePurchasedId,
             nodeId: nodeId,
           );

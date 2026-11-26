@@ -20,6 +20,7 @@ import 'core/services/fcm_service.dart';
 import 'core/services/local_notification_service.dart';
 import 'core/services/notification_router.dart';
 import 'core/session/session_service.dart';
+import 'core/session/session_watchdog.dart';
 import 'core/storage/secure_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/bloc/theme_cubit.dart';
@@ -369,6 +370,20 @@ class _CrinzaAppState extends State<CrinzaApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _routeChanges = _SafePhaseNotifier(AppRouter.router.routerDelegate);
+    // A reset/block made while the app was closed: sign out on open.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => SessionWatchdog.check(reason: 'startup'),
+    );
+  }
+
+  /// A reset/block made while the app was in the background (its silent
+  /// push may have arrived in an isolate that can't sign out): check the
+  /// moment the learner comes back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      SessionWatchdog.check(reason: 'resume');
+    }
   }
 
   @override

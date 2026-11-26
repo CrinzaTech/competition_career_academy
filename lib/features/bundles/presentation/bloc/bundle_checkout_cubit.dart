@@ -2,6 +2,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'package:competition_career_academy/core/bloc/safe_cubit.dart';
 import 'package:competition_career_academy/core/error/failures.dart';
+import 'package:competition_career_academy/core/network/network_exception_mapper.dart';
 import 'package:competition_career_academy/core/services/course_access_events.dart';
 import 'package:competition_career_academy/features/bundles/data/models/bundle_model.dart';
 import 'package:competition_career_academy/features/bundles/domain/usecases/bundle_usecases.dart';
@@ -43,13 +44,22 @@ class BundleCheckoutCubit extends SafeCubit<BundleCheckoutState> {
   /// P1 — only ever on a Pay tap. [shownTotal] is the `totalPayable` the
   /// learner was looking at; if the server now prices it differently the
   /// new breakdown is shown for confirmation before any sheet opens.
-  Future<void> start(int bundleId, {required double shownTotal}) async {
+  Future<void> start(
+    int bundleId, {
+    required double shownTotal,
+    String? termsHash,
+  }) async {
     emit(const BundleCheckoutState.creatingOrder());
 
-    final result = await createBundleOrderUseCase(bundleId);
+    final result = await createBundleOrderUseCase(bundleId, termsHash: termsHash);
     result.fold(
       (failure) {
         switch (_statusOf(failure)) {
+          case termsRefusedStatusCode:
+            // Terms not accepted, or edited since the page loaded. Not a
+            // payment problem: the page reloads B2 (new terms) and the
+            // next Pay tap shows them again.
+            emit(BundleCheckoutState.refused(failure.message));
           case 403 || 404:
             // Off sale, a course changed, they already own everything,
             // or the bundle is gone. Retrying cannot help; the page

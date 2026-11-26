@@ -930,6 +930,7 @@ class _CurriculumTabState extends State<_CurriculumTab> {
             courseId: course.courseId,
             coursePurchasedId: course.coursePurchasedId,
             activateWatermark: course.courseNodes?.activateWatermark ?? false,
+            isFreeContent: course.isFreeContent,
             highlighted: focused,
           );
         }),

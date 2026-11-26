@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'package:competition_career_academy/core/config/di/dependency_injection.dart';
 import 'package:competition_career_academy/core/network/token_refresh_service.dart';
@@ -7,6 +10,8 @@ import 'package:competition_career_academy/core/router/app_routes.dart';
 import 'package:competition_career_academy/core/services/org_code_service.dart';
 import 'package:competition_career_academy/core/session/session_service.dart';
 import 'package:competition_career_academy/core/utils/utils.dart';
+import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Injects the Bearer token into every outgoing request and centralizes
@@ -45,6 +50,27 @@ class AuthInterceptor extends Interceptor {
   /// all come back with 401 once the session dies for real. Without this flag
   /// we'd stack multiple `router.go(login)` calls and clearToken() races.
   static bool _logoutInProgress = false;
+
+  /// 401 `code`s meaning an admin ended this learner's session on purpose:
+  /// a device reset (`session_revoked`) or a block (`account_blocked`).
+  /// Unlike `token_expired` there is nothing to renew — the backend has
+  /// already revoked every refresh token — so the only correct response is
+  /// to sign out now and tell the learner why.
+  static const Set<String> _serverEndedCodes = {
+    'session_revoked',
+    'account_blocked',
+  };
+
+  /// Entry point for anything that learns the session was ended server-side
+  /// — the 401 path below, and the ChatHub `ForceLogout` push.
+  static void endSessionFromServer(String code, String? message) {
+    final notice = (message != null && message.trim().isNotEmpty)
+        ? message.trim()
+        : (code == 'account_blocked'
+              ? 'Your account has been blocked. Please contact your institute.'
+              : 'Your login was reset by your institute. Please log in again.');
+    _forceLogout('server ended session ($code)', notice: notice);
+  }
 
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
@@ -93,6 +119,18 @@ class AuthInterceptor extends Interceptor {
   void onError(DioException err, ErrorInterceptorHandler handler) {
     final status = err.response?.statusCode;
     if (status != 401) {
+      handler.next(err);
+      return;
+    }
+
+    // Checked before every other branch: whichever token the request
+    // carried (session or chat), these codes are only ever sent for this
+    // learner's own identity, and they mean the session is over for good.
+    final body = err.response?.data;
+    final serverCode = TokenRefreshService.errorCodeOf(body);
+    if (serverCode != null && _serverEndedCodes.contains(serverCode)) {
+      final msg = body is Map ? body['message']?.toString() : null;
+      endSessionFromServer(serverCode, msg);
       handler.next(err);
       return;
     }
@@ -344,17 +382,17 @@ class AuthInterceptor extends Interceptor {
 
   /// End the session for real. Guarded so a screenful of parallel 401s
   /// produces one logout, not five.
-  void _forceLogout(String reason) {
+  static void _forceLogout(String reason, {String? notice}) {
     if (_logoutInProgress) return;
     _logoutInProgress = true;
     Utils.debugLog('AuthInterceptor: $reason — logging out');
     // Fire-and-forget: do not block the error handler chain. The caller
     // still sees the 401, and the logout navigation happens on the next
     // microtask.
-    _logoutAndRedirect();
+    _logoutAndRedirect(notice: notice);
   }
 
-  Future<void> _logoutAndRedirect() async {
+  static Future<void> _logoutAndRedirect({String? notice}) async {
     try {
       // No `revokeSession` here on purpose: we only reach this path because
       // the backend already refused the refresh token (or there was never
@@ -363,16 +401,37 @@ class AuthInterceptor extends Interceptor {
       OrgCodeService.instance.clear();
       // Use go() to swap the stack rather than push() so the user can't
       // back-navigate into the now-unauthenticated app.
-      if (dotenv.env['ORG_ID'] == 'CRINZA') {
+      // Org Code gate only on iOS when ORG_ID is CRINZA — the same rule as
+      // the splash screen and the profile logout. Android goes to login.
+      final orgId = (dotenv.env['ORG_ID'] ?? '').toUpperCase();
+      final isIosAndCrinza = !kIsWeb && Platform.isIOS && orgId == 'CRINZA';
+      if (isIosAndCrinza) {
         AppRouter.router.go(AppRoutes.orgCode);
       } else {
         AppRouter.router.go(AppRoutes.login);
       }
+      if (notice != null) _showNoticeAfterRedirect(notice);
     } catch (e) {
       Utils.debugLog('AuthInterceptor: logout redirect failed — $e');
     } finally {
       _logoutInProgress = false;
     }
+  }
+
+  /// Shown once the login screen is up, so the learner knows they were
+  /// signed out on purpose and who to talk to.
+  static void _showNoticeAfterRedirect(String notice) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context =
+          AppRouter.router.routerDelegate.navigatorKey.currentContext;
+      if (context == null || !context.mounted) return;
+      CustomSnackbar.error(
+        context,
+        title: 'Logged out',
+        message: notice,
+        duration: const Duration(seconds: 6),
+      );
+    });
   }
 
   /// Retrieve the access token from SessionService.

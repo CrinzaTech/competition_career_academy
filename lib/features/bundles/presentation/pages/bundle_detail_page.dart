@@ -13,6 +13,7 @@ import 'package:competition_career_academy/core/theme/branding_config.dart';
 import 'package:competition_career_academy/core/theme/screen.dart';
 import 'package:competition_career_academy/core/widgets/custom_appbar_widget.dart';
 import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
+import 'package:competition_career_academy/core/widgets/terms_acceptance_sheet.dart';
 import 'package:competition_career_academy/features/bundles/data/models/bundle_model.dart';
 import 'package:competition_career_academy/features/bundles/presentation/bloc/bundle_checkout_cubit.dart';
 import 'package:competition_career_academy/features/bundles/presentation/bloc/bundle_detail_cubit.dart';
@@ -494,6 +495,22 @@ class _CheckoutBarState extends State<_CheckoutBar> {
   void _reloadDetail() =>
       context.read<BundleDetailCubit>().load(_bundleId, silent: true);
 
+  /// Pay tap: Terms & Conditions first (when the bundle has them), then P1.
+  Future<void> _onPay(double total) async {
+    final bundle = widget.bundle;
+    final checkout = context.read<BundleCheckoutCubit>();
+    String? termsHash;
+    if (bundle.hasTerms) {
+      final agreed = await TermsAcceptanceSheet.show(
+        context,
+        terms: bundle.terms!,
+      );
+      if (!mounted || !agreed) return;
+      termsHash = bundle.termsHash;
+    }
+    checkout.start(_bundleId, shownTotal: total, termsHash: termsHash);
+  }
+
   Future<void> _confirmNewPrice(BundleOrder order) async {
     final cubit = context.read<BundleCheckoutCubit>();
     final ok = await showModalBottomSheet<bool>(
@@ -641,12 +658,7 @@ class _CheckoutBarState extends State<_CheckoutBar> {
                   ),
                   icon: Icons.lock_rounded,
                   loading: busy,
-                  onPressed: busy
-                      ? null
-                      : () => context.read<BundleCheckoutCubit>().start(
-                          _bundleId,
-                          shownTotal: total,
-                        ),
+                  onPressed: busy ? null : () => _onPay(total),
                 ),
               ),
             ],

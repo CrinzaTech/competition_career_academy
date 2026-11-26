@@ -226,12 +226,20 @@ class BundleDetail {
   final List<BundleCourse> courses;
   final BundlePricing pricing;
 
+  /// Markdown Terms & Conditions to accept before ordering; null = none.
+  final String? terms;
+
+  /// Sent back with the order once the learner agreed.
+  final String? termsHash;
+
   const BundleDetail({
     required this.card,
     this.description,
     this.adjustForOwned = false,
     this.courses = const [],
     this.pricing = const BundlePricing(),
+    this.terms,
+    this.termsHash,
   });
 
   factory BundleDetail.fromJson(Map<String, dynamic> json) => BundleDetail(
@@ -240,7 +248,12 @@ class BundleDetail {
     adjustForOwned: readBool(json['adjustForOwned']),
     courses: readList(json['courses'], BundleCourse.fromJson),
     pricing: BundlePricing.fromJson(readMap(json['pricing'])),
+    terms: readStringOrNull(json['terms']),
+    termsHash: readStringOrNull(json['termsHash']),
   );
+
+  bool get hasTerms =>
+      terms != null && terms!.trim().isNotEmpty && termsHash != null;
 
   int get bundleId => card.bundleId;
 }

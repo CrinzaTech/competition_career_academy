@@ -9,6 +9,7 @@ import 'package:competition_career_academy/core/theme/app_typography.dart';
 import 'package:competition_career_academy/core/theme/responsive_helper.dart';
 import 'package:competition_career_academy/core/theme/screen.dart';
 import 'package:competition_career_academy/core/utils/document_opener.dart';
+import 'package:competition_career_academy/core/utils/drive_url.dart';
 import 'package:competition_career_academy/core/widgets/custom_snackbar.dart';
 import 'package:competition_career_academy/features/courses/data/models/course_model.dart';
 import 'package:competition_career_academy/features/courses/data/models/live_class_models.dart';
@@ -42,6 +43,12 @@ class ModuleCard extends StatelessWidget {
   /// so the learner's eye lands on this row. No other behaviour change.
   final bool highlighted;
 
+  /// The row belongs to the org's Free Content page (`Course.isFreeContent`).
+  /// There, Google Drive video and PDF links open in Drive's own embedded
+  /// player — streamed from Drive, nothing stored on our servers. Paid
+  /// courses keep the in-app player (watermark + progress tracking).
+  final bool isFreeContent;
+
   const ModuleCard({
     super.key,
     required this.module,
@@ -49,6 +56,7 @@ class ModuleCard extends StatelessWidget {
     this.coursePurchasedId = 0,
     this.activateWatermark = false,
     this.highlighted = false,
+    this.isFreeContent = false,
   });
 
   @override
@@ -196,7 +204,21 @@ class ModuleCard extends StatelessWidget {
               '?folderId=${Uri.encodeComponent(module.nodeId)}'
               '&courseId=$courseId'
               '&coursePurchasedId=$coursePurchasedId'
-              '&activateWatermark=$activateWatermark',
+              '&activateWatermark=$activateWatermark'
+              '&isFreeContent=$isFreeContent',
+            );
+          } else if (isFreeContent &&
+              (module.type == CourseContentType.video ||
+                  module.type == CourseContentType.document) &&
+              driveEmbedUrl(module.primaryUrl ?? '') != null) {
+            // Free Content Drive video / PDF → Drive's own player. Our
+            // video player's direct-download link fails on large or popular
+            // Drive files, and a Drive share link is an HTML page, not a PDF.
+            context.push(
+              '${AppRoutes.driveEmbed}'
+              '?title=${Uri.encodeComponent(module.nodeName)}'
+              '&url=${Uri.encodeComponent(driveEmbedUrl(module.primaryUrl!)!)}'
+              '$completionArgs',
             );
           } else if (module.type == CourseContentType.document &&
               module.pdfUrl != null) {

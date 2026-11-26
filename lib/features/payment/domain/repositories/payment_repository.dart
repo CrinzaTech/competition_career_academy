@@ -11,6 +11,10 @@ abstract class PaymentRepository {
     required int courseId,
     required int priceId,
     String? couponCode,
+
+    /// The pricing-v2 `termsHash` the learner agreed to; null when the
+    /// course has no terms.
+    String? termsHash,
   });
 
   Future<Either<Failure, VerifyPaymentResponse>> verifyPayment({

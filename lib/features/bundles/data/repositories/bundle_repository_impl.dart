@@ -82,11 +82,19 @@ class BundleRepositoryImpl implements BundleRepository {
       );
 
   @override
-  Future<Either<Failure, BundleOrder>> createBundleOrder(int bundleId) async {
+  Future<Either<Failure, BundleOrder>> createBundleOrder(
+    int bundleId, {
+    String? termsHash,
+  }) async {
     final result = await _send(
-      // No body: the bundle comes from the route and the amount from the
-      // database, so there is nothing here for a client to set.
-      () => _dio.post(_path(ApiEndpoints.bundleOrder, 'bundleId', bundleId)),
+      // The bundle comes from the route and the amount from the database;
+      // the only body is the Terms & Conditions acceptance, when needed.
+      () => _dio.post(
+        _path(ApiEndpoints.bundleOrder, 'bundleId', bundleId),
+        data: termsHash == null
+            ? null
+            : {'termsAccepted': true, 'termsHash': termsHash},
+      ),
       (data) => BundleOrder.fromJson(readMap(data)),
     );
     return result.flatMap((order) {

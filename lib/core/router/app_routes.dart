@@ -124,6 +124,10 @@ class AppRoutes {
   /// Image viewer route — used for image curriculum nodes.
   static const String imageViewer = '/courses/image';
 
+  /// Google Drive's embedded player for Free Content Drive video/PDF
+  /// links. `url` is the resolved `/preview` URL.
+  static const String driveEmbed = '/courses/drive';
+
   /// Assignment screen — accepts `assignmentId` (path id for the GET,
   /// parsed from the curriculum node's `url` field), `courseId` (sent
   /// alongside on submit), `nodeId` (jsonNodeId for completion + submit),

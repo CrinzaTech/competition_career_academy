@@ -44,8 +44,8 @@ class CreateBundleOrderUseCase {
 
   CreateBundleOrderUseCase(this.repository);
 
-  Future<Either<Failure, BundleOrder>> call(int bundleId) =>
-      repository.createBundleOrder(bundleId);
+  Future<Either<Failure, BundleOrder>> call(int bundleId, {String? termsHash}) =>
+      repository.createBundleOrder(bundleId, termsHash: termsHash);
 }
 
 /// P2 — verify the payment and unlock the courses.

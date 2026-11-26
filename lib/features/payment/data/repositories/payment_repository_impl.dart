@@ -16,6 +16,7 @@ class PaymentRepositoryImpl implements PaymentRepository {
     required int courseId,
     required int priceId,
     String? couponCode,
+    String? termsHash,
   }) async {
     try {
       final body = <String, dynamic>{
@@ -24,6 +25,11 @@ class PaymentRepositoryImpl implements PaymentRepository {
       };
       if (couponCode != null && couponCode.isNotEmpty) {
         body['couponCode'] = couponCode;
+      }
+      // Only sent after the learner ticked "I agree" on the terms popup.
+      if (termsHash != null && termsHash.isNotEmpty) {
+        body['termsAccepted'] = true;
+        body['termsHash'] = termsHash;
       }
       final response = await _apiClient.createOrder(body);
       final success = response['success'] as bool? ?? true;
